@@ -14,14 +14,14 @@ contract Rent is ERC721URIStorage, Ownable{
   struct PropertyData{
     address renter;
     states state;
-    uint reserve; //in ether
-    uint price; //in ether 
     uint8 minTimeToRent; // in months
     uint8 advancement; // in months
     uint32 maxTimeToRent; // in seconds
     uint32 startRentDate; // in block.timestamp
-    uint32 pricePerSecond; // (price/ 30 days) Can be changed, if there is a specific conflict resolution route;
     uint32 endRentDate;
+    uint reserve; //in ether
+    uint price; //in ether 
+    uint pricePerSecond; // (price/ 30 days) Can be changed, if there is a specific conflict resolution route;
   }
 
   struct tickets{
@@ -51,9 +51,28 @@ contract Rent is ERC721URIStorage, Ownable{
     coin = _coin;
   }
 
-  function register(PropertyData memory newProperty,string memory uri)public returns(uint){
+  function register(
+    uint reserve,
+    uint price,
+    uint minTimeToRent,
+    uint advancement,
+    uint maxTimeToRent,
+    string memory uri
+  )public returns(uint){
     uint256 tokenId = tokenIdCounter.current();
     tokenIdCounter.increment();
+    PropertyData memory newProperty = PropertyData(
+      address(0),
+      states.Free,
+      uint8(minTimeToRent), 
+      uint8(advancement), 
+      uint32(maxTimeToRent), 
+      uint32(block.timestamp), 
+      0,
+      reserve, 
+      price, 
+      (price/(30 days))
+    );
     
     registerPropertyData[tokenId] = newProperty;
     ownersOfpropertyList[msg.sender].push(tokenId);
@@ -67,13 +86,14 @@ contract Rent is ERC721URIStorage, Ownable{
     PropertyData storage property = registerPropertyData[id];
     require(uint(property.state) == 0, "The property  must be in Free mode");
     require(
-      property.minTimeToRent >= cantOfMonths  && cantOfMonths < property.maxTimeToRent, 
-      "The property  must be in Free mode"
+      property.minTimeToRent <= cantOfMonths  && cantOfMonths < property.maxTimeToRent, 
+      "newRent error"
     );
     // TODO : LOS FEES PA
-    uint totalAmount = (property.reserve + cantOfMonths ) *  property.price;
+    uint totalAmount = property.reserve + (cantOfMonths *  property.price);
     coin.transferFrom(msg.sender, address(this), totalAmount);
     amountToPayRents[id] += property.price * cantOfMonths;
+
     property.startRentDate = uint32(block.timestamp);
     property.state = states.Ocuped;
     property.renter = msg.sender;
@@ -82,6 +102,7 @@ contract Rent is ERC721URIStorage, Ownable{
   }
 
   function claimPayment(uint id) public {
+    PropertyData storage property = registerPropertyData[id];
     uint toPay = calculatePayment(id);
     require(amountToPayRents[id] >= toPay ,"Not founds in rents");
     require(registerPropertyData[id].state == states.Ocuped);
@@ -89,23 +110,28 @@ contract Rent is ERC721URIStorage, Ownable{
     amountToPayRents[id] -= toPay;
     coin.transfer(ownerOf(id), toPay);
     lastClaims[id] = block.timestamp;
-
-    //TODO reset state if finish.
-
+    if(property.endRentDate < block.timestamp){
+      property.state = states.Free;
+      property.renter = address(0);
+    }
   }
 
-  function createTicket(uint id, tickets memory _ticketData) public {
-    // stop payments
-    // estate solucion entre las dos partes x tiempo(24hrs)
-    // entidad 
+  function createTicket(uint id, string memory  _ticketUri) public {
     PropertyData storage property = registerPropertyData[id];
+    require(property.state == states.Ocuped, "must be occuped");
     require( 
       msg.sender == ownerOf(id) || msg.sender == property.renter, 
       "solo las partes involucradas puede crear un tiket" 
     );
     property.state= states.Stoped;
-    _ticketData.startTicketDate = uint16(block.timestamp);
-    ticketdata[id] = _ticketData;
+    tickets memory ticket = tickets(
+      msg.sender,
+      uint16(block.timestamp),
+      _ticketUri,ticketdata[id].lastResult,
+      ticketdata[id].lastAmountResult
+    );
+    ticket.startTicketDate = uint16(block.timestamp);
+    ticketdata[id] = ticket;
 
   }
 
@@ -117,19 +143,18 @@ contract Rent is ERC721URIStorage, Ownable{
     if(msg.sender == owner()){
       ticket.lastResult = winer;
       ticket.lastAmountResult = uint32(amount);
-      require(amount >= (property.reserve + amountToPayRents[id]), "resolve amount");
+      require(amount <= (property.reserve + amountToPayRents[id]), "resolve amount");
       if(amount > property.reserve){
         uint newAmount = amount-property.reserve;
         property.reserve = 0;
         amountToPayRents[id] -=  newAmount;
-        //todo recaulculate pricePerScond (amountToPayRents / (endRentDate-lastClaim) )
-        property.pricePerSecond = uint32(amountToPayRents[id] / (uint(property.endRentDate) - lastClaims[id])); 
+        property.pricePerSecond = uint(amountToPayRents[id] / (uint(property.endRentDate) - lastClaims[id])); 
         coin.transfer(winer, amount);
       }else{
         property.reserve -= amount;
         coin.transfer(winer, amount);
       }
-      property.state= states.Free;
+      property.state= states.Ocuped;
     }
   }
 
