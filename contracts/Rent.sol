@@ -8,7 +8,6 @@ import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 
 contract Rent is ERC721URIStorage, Ownable{
   using Counters for Counters.Counter;
-  
   enum states {Free,Ocuped,Stoped}
   
   struct PropertyData{
@@ -93,7 +92,7 @@ contract Rent is ERC721URIStorage, Ownable{
     uint totalAmount = property.reserve + (cantOfMonths *  property.price);
     coin.transferFrom(msg.sender, address(this), totalAmount);
     amountToPayRents[id] += property.price * cantOfMonths;
-
+    lastClaims[id] = block.timestamp; 
     property.startRentDate = uint32(block.timestamp);
     property.state = states.Ocuped;
     property.renter = msg.sender;
@@ -101,6 +100,8 @@ contract Rent is ERC721URIStorage, Ownable{
     emit NewRent(id, msg.sender, cantOfMonths);
   }
 
+
+  
   function claimPayment(uint id) public {
     PropertyData storage property = registerPropertyData[id];
     uint toPay = calculatePayment(id);
@@ -163,6 +164,7 @@ contract Rent is ERC721URIStorage, Ownable{
     return registerPropertyData[id];
   }
 
+  //todo fix this jock
   function calculatePayment(uint id) public view returns(uint){
     PropertyData memory property = registerPropertyData[id];
     require(uint(property.state) == 1);
